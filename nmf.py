@@ -297,3 +297,128 @@ def rnmf_fhals(A, k, p=20, q=2, init='normal', tol=1e-4, maxiter=100, verbose=Fa
         print('Final Iteration: %s fit: %s' %(niter, fit)) 
         
     return( W, Ht.T )
+
+def snmf_fhals(A, k, init='normal', tol=1e-4, maxiter=100, verbose=False):
+    """
+    Nonnegative Matrix Factorization.
+    
+    Hierarchical alternating least squares algorithm
+    for computing the approximate low-rank nonnegative matrix factorization of 
+    a square `(m, m)` matrix `A`. Given the target rank `k << m`, 
+    the input matrix `A` is factored as `A = W Wt`. The nonnegative factor 
+    matrices `W` and `Wt` are of dimension `(m, k)` and `(k, m)`, respectively.
+           
+    
+    Parameters
+    ----------
+    A : array_like, shape `(m, m)`.
+        Real nonnegative input matrix.
+    
+    k : integer, `k << m`.
+        Target rank.
+    
+    init : str `{'normal'}`. 
+        'normal' : Factor matrices are initialized with nonnegative 
+                   Gaussian random numbers.
+            
+    tol : float, default: `tol=1e-4`.
+        Tolerance of the stopping condition.
+        
+    maxiter : integer, default: `maxiter=100`.
+        Number of iterations.   
+        
+    verbose : boolean, default: `verbose=False`.
+        The verbosity level.        
+    
+    
+    Returns
+    -------
+    W:  array_like, `(m, k)`.
+        Solution to the non-negative least squares problem.
+    """    
+    
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Error catching
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~     
+    m, n = A.shape  
+
+    assert m == n
+    
+    if (A < 0).any():
+        raise ValueError("Input matrix with nonnegative elements is required.")    
+    
+    if  A.dtype == sci.float32: 
+        data_type = sci.float32
+        
+    elif A.dtype == sci.float64: 
+        data_type = sci.float64  
+
+    else:
+        raise ValueError("A.dtype is not supported.")    
+    
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~                            
+    # Initialization methods for factor matrices W and H
+    # 'normal': nonnegative standard normal random init
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
+    
+    if init == 'normal':
+        m, n = A.shape
+        assert m == n
+        W = sci.maximum(0.0, sci.random.standard_normal((m, k)))
+        Ht = W.copy()
+    else:
+        raise ValueError('Initialization method is not supported.')
+    #End if
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # Iterate the HALS algorithm until convergence or maxiter is reached
+    # i)   Update factor matrix H and normalize columns   
+    # ii)  Update low-dimensional factor matrix W
+    # iii) Compute fit log( ||A-WH|| )
+    #   -> break if fit <-5 or fit_change < tol
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~    
+    
+    for niter in range(maxiter): 
+        violation = 0.0
+
+        # Update factor matrix H
+        WtW = W.T.dot(W)
+        AtW = A.T.dot(W)
+
+        #violation += _fhals_update(Ht, WtW, AtW)
+        violation += _fhals_update(W, WtW, AtW)
+        #print violation
+        #Ht /= sci.maximum(epsi, sci.linalg.norm(Ht, axis=0))
+        W /= sci.maximum(epsi, sci.linalg.norm(W, axis=0))
+        # Update factor matrix W
+        #HHt = Ht.T.dot(Ht)
+        #AHt = A.dot(Ht) # Rotate AHt back to high-dimensional space
+
+        #violation += _fhals_update(W, HHt, AHt)
+
+        # Compute stopping condition.
+        if niter == 0:
+            violation_init = violation
+
+        if violation_init == 0:
+            break       
+
+        fitchange = violation / violation_init
+        
+        if verbose == True:
+            print('Iteration: %s fit: %s, fitchange: %s' %(niter, violation, fitchange))        
+
+        if fitchange <= tol:
+            break
+
+    #End for
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~                            
+    # Return factor matrices
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
+    if verbose == True:
+        print('Final Iteration: %s fit: %s' %(niter, violation)) 
+        
+    #return( W, Ht.T )
+    return(W,W.T)
