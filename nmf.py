@@ -7,6 +7,9 @@ from scipy import linalg
 from _fhals_update import _fhals_update
 from _rfhals_update import _rfhals_update
 
+from oct2py import octave
+octave.addpath("/Users/hyunjoonsong/Documents/MIT/MEng_Year/18.065/symnmf")
+
 epsi = np.finfo(np.float32).eps
 
 def nmf_fhals(A, k, init='normal', tol=1e-4, maxiter=100, verbose=False):
@@ -298,7 +301,7 @@ def rnmf_fhals(A, k, p=20, q=2, init='normal', tol=1e-4, maxiter=100, verbose=Fa
         
     return( W, Ht.T )
 
-def snmf_fhals(A, k, init='normal', tol=1e-4, maxiter=100, verbose=False):
+def snmf_fhals(A, k, init='normal'):
     """
     Nonnegative Matrix Factorization.
     
@@ -340,8 +343,7 @@ def snmf_fhals(A, k, init='normal', tol=1e-4, maxiter=100, verbose=False):
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Error catching
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~     
-    m, n = A.shape  
-
+    m, n = A.shape
     assert m == n
     
     if (A < 0).any():
@@ -363,10 +365,13 @@ def snmf_fhals(A, k, init='normal', tol=1e-4, maxiter=100, verbose=False):
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
     
     if init == 'normal':
-        m, n = A.shape
-        assert m == n
-        W = sci.maximum(0.0, sci.random.standard_normal((m, k)))
-        Ht = W.copy()
+        n, _ = A.shape
+        H = 2 * np.sqrt(np.mean(np.mean(A)) / k) * np.random.rand(n, k)
+        maxiter = 10000
+        tol = 1e-3
+        alpha = np.max(H)**2
+        W = H.copy()
+        I_k = alpha * np.identity(k)
     else:
         raise ValueError('Initialization method is not supported.')
     #End if
@@ -378,47 +383,65 @@ def snmf_fhals(A, k, init='normal', tol=1e-4, maxiter=100, verbose=False):
     # iii) Compute fit log( ||A-WH|| )
     #   -> break if fit <-5 or fit_change < tol
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~    
-    
-    for niter in range(maxiter): 
-        violation = 0.0
 
-        # Update factor matrix H
-        WtW = W.T.dot(W)
-        AtW = A.T.dot(W)
+    projnorm = float('inf')
+    left = H.T.dot(H)
+    right = A.dot(H)
 
-        #violation += _fhals_update(Ht, WtW, AtW)
-        violation += _fhals_update(W, WtW, AtW)
-        #print violation
-        #Ht /= sci.maximum(epsi, sci.linalg.norm(Ht, axis=0))
-        W /= sci.maximum(epsi, sci.linalg.norm(W, axis=0))
-        # Update factor matrix W
-        #HHt = Ht.T.dot(Ht)
-        #AHt = A.dot(Ht) # Rotate AHt back to high-dimensional space
+    import time
 
-        #violation += _fhals_update(W, HHt, AHt)
+    for niter in range(maxiter):
+    	# print("Iteration %d" % (niter + 1))
 
-        # Compute stopping condition.
-        if niter == 0:
-            violation_init = violation
+    	start = time.time() 
+    	octave.push('left', left)
+    	octave.push('right', right)
+    	octave.push('alpha', alpha)
+    	octave.push('H', H)
+    	octave.push('W', W)
+    	octave.push('I_k', I_k)
+    	print("Pushing Time Elapsed: %f" % (time.time() - start))
 
-        if violation_init == 0:
-            break       
+    	start = time.time() 
+    	W = octave.eval("nnlsm_blockpivot(left + I_k, (right + alpha * H)', 1, W')'", verbose=False)
+    	print("Eval 1 Time Elapsed: %f" % (time.time() - start))
 
-        fitchange = violation / violation_init
-        
-        if verbose == True:
-            print('Iteration: %s fit: %s, fitchange: %s' %(niter, violation, fitchange))        
+    	left = W.T.dot(W)
+    	right = A.dot(W)
 
-        if fitchange <= tol:
-            break
+    	start = time.time() 
+    	H = octave.eval("nnlsm_blockpivot(left + I_k, (right + alpha * W)', 1, H')'", verbose=False)
+    	print("Eval 2 Time Elapsed: %f" % (time.time() - start))
 
-    #End for
+    	tempW = np.sum(W, axis=1)
+    	tempH = np.sum(H, axis=1)
+    	temp = alpha * (H - W)
 
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~                            
-    # Return factor matrices
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
-    if verbose == True:
-        print('Final Iteration: %s fit: %s' %(niter, violation)) 
-        
-    #return( W, Ht.T )
-    return(W,W.T)
+    	gradH = H.dot(left) - right + temp
+
+    	left = H.T.dot(H)
+    	right = A.dot(H)
+
+    	gradW = W.dot(left) - right - temp
+
+    	octave.push('gradH', gradH)
+    	octave.push('gradW', gradW)
+    	octave.push('H', H)
+    	octave.push('W', W)
+
+    	if niter == 0:
+    		# initgrad = octave.eval("sqrt(norm(gradW(gradW<=0|W>0))^2 + norm(gradH(gradH<=0|H>0))^2)", verbose=False)
+    		initgrad = np.sqrt(np.linalg.norm(gradW[(gradW <= 0) | (W > 0)])**2 + np.linalg.norm(gradH[(gradH <= 0) | (H > 0)])**2)
+    		# print("Initial Gradient Norm: %f" % initgrad)
+    	else:
+    		# projnorm = octave.eval("sqrt(norm(gradW(gradW<=0|W>0))^2 + norm(gradH(gradH<=0|H>0))^2)", verbose=False)
+    		projnorm = np.sqrt(np.linalg.norm(gradW[(gradW <= 0) | (W > 0)])**2 + np.linalg.norm(gradH[(gradH <= 0) | (H > 0)])**2)
+    		# print("Projected Gradient Norm: %f" % projnorm)
+
+    	if projnorm < tol * initgrad:
+    		# print('Final Gradient Norm: %f' % projnorm)
+    		break
+
+    return H
+
+A = np.ones((100, 100))
