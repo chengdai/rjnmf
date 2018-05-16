@@ -99,17 +99,20 @@ def nmf_fhals(A, k, init='normal', tol=1e-4, maxiter=100, verbose=False):
         # Update factor matrix H
         WtW = W.T.dot(W)
         AtW = A.T.dot(W)
-        
-        violation += _fhals_update(Ht, WtW, AtW)                        
+
+        new_violation = _fhals_update(Ht, WtW, AtW)
+        violation += new_violation                     
         Ht /= sci.maximum(epsi, sci.linalg.norm(Ht, axis=0))
 
         # Update factor matrix W
         HHt = Ht.T.dot(Ht)
         AHt = A.dot(Ht) # Rotate AHt back to high-dimensional space
 
-        violation += _fhals_update(W, HHt, AHt)
-        
-        
+        new_violation = _fhals_update(W, HHt, AHt)
+        violation += new_violation
+
+        # print(violation)
+
         # Compute stopping condition.
         if niter == 0:
             violation_init = violation
@@ -301,6 +304,149 @@ def rnmf_fhals(A, k, p=20, q=2, init='normal', tol=1e-4, maxiter=100, verbose=Fa
         
     return( W, Ht.T )
 
+# def snmf_fhals(A, k, init='normal'):
+#     """
+#     Nonnegative Matrix Factorization.
+    
+#     Hierarchical alternating least squares algorithm
+#     for computing the approximate low-rank nonnegative matrix factorization of 
+#     a square `(m, m)` matrix `A`. Given the target rank `k << m`, 
+#     the input matrix `A` is factored as `A = W Wt`. The nonnegative factor 
+#     matrices `W` and `Wt` are of dimension `(m, k)` and `(k, m)`, respectively.
+           
+    
+#     Parameters
+#     ----------
+#     A : array_like, shape `(m, m)`.
+#         Real nonnegative input matrix.
+    
+#     k : integer, `k << m`.
+#         Target rank.
+    
+#     init : str `{'normal'}`. 
+#         'normal' : Factor matrices are initialized with nonnegative 
+#                    Gaussian random numbers.
+            
+#     tol : float, default: `tol=1e-4`.
+#         Tolerance of the stopping condition.
+        
+#     maxiter : integer, default: `maxiter=100`.
+#         Number of iterations.   
+        
+#     verbose : boolean, default: `verbose=False`.
+#         The verbosity level.        
+    
+    
+#     Returns
+#     -------
+#     W:  array_like, `(m, k)`.
+#         Solution to the non-negative least squares problem.
+#     """    
+    
+#     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#     # Error catching
+#     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~     
+#     m, n = A.shape
+#     assert m == n
+    
+#     if (A < 0).any():
+#         raise ValueError("Input matrix with nonnegative elements is required.")    
+    
+#     if  A.dtype == sci.float32: 
+#         data_type = sci.float32
+        
+#     elif A.dtype == sci.float64: 
+#         data_type = sci.float64  
+
+#     else:
+#         raise ValueError("A.dtype is not supported.")    
+    
+
+#     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~                            
+#     # Initialization methods for factor matrices W and H
+#     # 'normal': nonnegative standard normal random init
+#     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
+    
+#     if init == 'normal':
+#         n, _ = A.shape
+#         H = 2 * np.sqrt(np.mean(np.mean(A)) / k) * np.random.rand(n, k)
+#         maxiter = 10000
+#         tol = 1e-3
+#         alpha = np.max(H)**2
+#         W = H.copy()
+#         I_k = alpha * np.identity(k)
+#     else:
+#         raise ValueError('Initialization method is not supported.')
+#     #End if
+
+#     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#     # Iterate the HALS algorithm until convergence or maxiter is reached
+#     # i)   Update factor matrix H and normalize columns   
+#     # ii)  Update low-dimensional factor matrix W
+#     # iii) Compute fit log( ||A-WH|| )
+#     #   -> break if fit <-5 or fit_change < tol
+#     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~    
+
+#     projnorm = float('inf')
+#     left = H.T.dot(H)
+#     right = A.dot(H)
+
+#     import time
+
+#     for niter in range(maxiter):
+#     	# print("Iteration %d" % (niter + 1))
+
+#     	# start = time.time() 
+#     	octave.push('left', left)
+#     	octave.push('right', right)
+#     	octave.push('alpha', alpha)
+#     	octave.push('H', H)
+#     	octave.push('W', W)
+#     	octave.push('I_k', I_k)
+#     	# print("Pushing Time Elapsed: %f" % (time.time() - start))
+
+#     	# start = time.time() 
+#     	W = octave.eval("nnlsm_blockpivot(left + I_k, (right + alpha * H)', 1, W')'", verbose=False)
+#     	# print("Eval 1 Time Elapsed: %f" % (time.time() - start))
+
+#     	left = W.T.dot(W)
+#     	right = A.dot(W)
+
+#     	# start = time.time() 
+#     	H = octave.eval("nnlsm_blockpivot(left + I_k, (right + alpha * W)', 1, H')'", verbose=False)
+#     	# print("Eval 2 Time Elapsed: %f" % (time.time() - start))
+
+#     	tempW = np.sum(W, axis=1)
+#     	tempH = np.sum(H, axis=1)
+#     	temp = alpha * (H - W)
+
+#     	gradH = H.dot(left) - right + temp
+
+#     	left = H.T.dot(H)
+#     	right = A.dot(H)
+
+#     	gradW = W.dot(left) - right - temp
+
+#     	octave.push('gradH', gradH)
+#     	octave.push('gradW', gradW)
+#     	octave.push('H', H)
+#     	octave.push('W', W)
+
+#     	if niter == 0:
+#     		# initgrad = octave.eval("sqrt(norm(gradW(gradW<=0|W>0))^2 + norm(gradH(gradH<=0|H>0))^2)", verbose=False)
+#     		initgrad = np.sqrt(np.linalg.norm(gradW[(gradW <= 0) | (W > 0)])**2 + np.linalg.norm(gradH[(gradH <= 0) | (H > 0)])**2)
+#     		# print("Initial Gradient Norm: %f" % initgrad)
+#     	else:
+#     		# projnorm = octave.eval("sqrt(norm(gradW(gradW<=0|W>0))^2 + norm(gradH(gradH<=0|H>0))^2)", verbose=False)
+#     		projnorm = np.sqrt(np.linalg.norm(gradW[(gradW <= 0) | (W > 0)])**2 + np.linalg.norm(gradH[(gradH <= 0) | (H > 0)])**2)
+#     		# print("Projected Gradient Norm: %f" % projnorm)
+
+#     	if projnorm < tol * initgrad:
+#     		# print('Final Gradient Norm: %f' % projnorm)
+#     		break
+
+#     return H
+
 def snmf_fhals(A, k, init='normal'):
     """
     Nonnegative Matrix Factorization.
@@ -388,60 +534,29 @@ def snmf_fhals(A, k, init='normal'):
     left = H.T.dot(H)
     right = A.dot(H)
 
-    import time
+    octave.push('A', A)
+    octave.push('k', k)
 
     for niter in range(maxiter):
-    	# print("Iteration %d" % (niter + 1))
-
-    	start = time.time() 
+    	octave.push('W', W)
+    	octave.push('H', H)
     	octave.push('left', left)
     	octave.push('right', right)
-    	octave.push('alpha', alpha)
-    	octave.push('H', H)
-    	octave.push('W', W)
-    	octave.push('I_k', I_k)
-    	print("Pushing Time Elapsed: %f" % (time.time() - start))
 
-    	start = time.time() 
-    	W = octave.eval("nnlsm_blockpivot(left + I_k, (right + alpha * H)', 1, W')'", verbose=False)
-    	print("Eval 1 Time Elapsed: %f" % (time.time() - start))
+    	octave.eval("[W, H, left, right, violation] = symnmf_anls_iter(A, W, H, left, right, k)", verbose=False)
 
-    	left = W.T.dot(W)
-    	right = A.dot(W)
-
-    	start = time.time() 
-    	H = octave.eval("nnlsm_blockpivot(left + I_k, (right + alpha * W)', 1, H')'", verbose=False)
-    	print("Eval 2 Time Elapsed: %f" % (time.time() - start))
-
-    	tempW = np.sum(W, axis=1)
-    	tempH = np.sum(H, axis=1)
-    	temp = alpha * (H - W)
-
-    	gradH = H.dot(left) - right + temp
-
-    	left = H.T.dot(H)
-    	right = A.dot(H)
-
-    	gradW = W.dot(left) - right - temp
-
-    	octave.push('gradH', gradH)
-    	octave.push('gradW', gradW)
-    	octave.push('H', H)
-    	octave.push('W', W)
+    	W = octave.pull("W")
+    	H = octave.pull("H")
+    	left = octave.pull("left")
+    	right = octave.pull("right")
+    	violation = octave.pull("violation")
 
     	if niter == 0:
-    		# initgrad = octave.eval("sqrt(norm(gradW(gradW<=0|W>0))^2 + norm(gradH(gradH<=0|H>0))^2)", verbose=False)
-    		initgrad = np.sqrt(np.linalg.norm(gradW[(gradW <= 0) | (W > 0)])**2 + np.linalg.norm(gradH[(gradH <= 0) | (H > 0)])**2)
-    		# print("Initial Gradient Norm: %f" % initgrad)
+    		initgrad = violation
     	else:
-    		# projnorm = octave.eval("sqrt(norm(gradW(gradW<=0|W>0))^2 + norm(gradH(gradH<=0|H>0))^2)", verbose=False)
-    		projnorm = np.sqrt(np.linalg.norm(gradW[(gradW <= 0) | (W > 0)])**2 + np.linalg.norm(gradH[(gradH <= 0) | (H > 0)])**2)
-    		# print("Projected Gradient Norm: %f" % projnorm)
+    		projnorm = violation
 
     	if projnorm < tol * initgrad:
-    		# print('Final Gradient Norm: %f' % projnorm)
     		break
 
     return H
-
-A = np.ones((100, 100))
